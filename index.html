@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>在地健康助手 - 完全離線版</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 768px) { .grid { grid-template-columns: 350px 1fr; } }
+        
+        label { display: block; font-size: 0.75rem; font-weight: bold; color: #64748b; margin-bottom: 5px; text-transform: uppercase; }
+        input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; margin-bottom: 15px; font-size: 1rem; }
+        button { cursor: pointer; border: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
+        .btn-save { background: var(--primary); color: white; width: 100%; padding: 12px; font-size: 1rem; }
+        .btn-save:hover { background: #4338ca; }
+        .btn-export { background: #10b981; color: white; padding: 8px 16px; }
+
+        .bmi-badge { background: #e0e7ff; color: var(--primary); padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 15px; }
+        .bmi-val { font-size: 2rem; font-weight: 900; }
+
+        /* SVG 圖表樣式 */
+        #chart-container { width: 100%; height: 250px; background: #fff; position: relative; }
+        .line-path { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; }
+        .dot { fill: var(--primary); cursor: pointer; }
+        .grid-line { stroke: #f1f5f9; stroke-width: 1; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+        th { text-align: left; color: #64748b; padding: 10px; border-bottom: 2px solid #f1f5f9; }
+        td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div>
+            <h1 style="margin:0; color: var(--primary);">HealthLocal</h1>
+            <small>數據本地存儲・無須聯網</small>
+        </div>
+        <button onclick="exportData()" class="btn-export">匯出備份 (JSON)</button>
+    </header>
+
+    <div class="grid">
+        <div class="card">
+            <h3 style="margin-top:0">數據輸入</h3>
+            <label>身高 (cm)</label>
+            <input type="number" id="height" placeholder="例如: 175" oninput="updateBMI()">
+            <label>體重 (kg)</label>
+            <input type="number" id="weight" placeholder="例如: 70" oninput="updateBMI()">
+            
+            <div class="bmi-badge">
+                <div style="font-size: 0.8rem">目前計算 BMI</div>
+                <div id="bmi-result" class="bmi-val">--</div>
+            </div>
+
+            <label>血壓 (收縮/舒張)</label>
+            <div style="display:flex; gap:10px">
+                <input type="number" id="sys" placeholder="收縮壓">
+                <input type="number" id="dia" placeholder="舒張壓">
+            </div>
+            <label>心跳 (bpm)</label>
+            <input type="number" id="hr" placeholder="心跳數">
+            
+            <button class="btn-save" onclick="saveRecord()">儲存今日數據</button>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0">體重趨勢圖 (原生 SVG)</h3>
+            <div id="chart-container">
+                <svg id="svg-chart" width="100%" height="100%" viewBox="0 0 500 250" preserveAspectRatio="none">
+                    </svg>
+            </div>
+            
+            <h3 style="margin-top:20px">歷史紀錄</h3>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>BMI</th>
+                            <th>血壓</th>
+                            <th>心跳</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-list"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const STORAGE_KEY = 'local_health_db';
+
+    // 初始化讀取
+    window.onload = () => {
+        const history = getHistory();
+        renderTable(history);
+        renderChart(history);
+    };
+
+    function getHistory() {
+        const data = localStorage.getItem(STORAGE_KEY);
+        return data ? JSON.parse(data) : [];
+    }
+
+    function updateBMI() {
+        const h = document.getElementById('height').value / 100;
+        const w = document.getElementById('weight').value;
+        if (h > 0 && w > 0) {
+            const bmi = (w / (h * h)).toFixed(1);
+            document.getElementById('bmi-result').innerText = bmi;
+            return bmi;
+        }
+        return "--";
+    }
+
+    function saveRecord() {
+        const record = {
+            date: new Date().toLocaleDateString(),
+            ts: Date.now(),
+            weight: parseFloat(document.getElementById('weight').value),
+            bmi: updateBMI(),
+            sys: document.getElementById('sys').value,
+            dia: document.getElementById('dia').value,
+            hr: document.getElementById('hr').value
+        };
+
+        if(!record.weight || record.bmi === "--") return alert("請輸入完整體重數據");
+
+        const history = getHistory();
+        history.push(record);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        
+        renderTable(history);
+        renderChart(history);
+        alert("已存入本地資料庫");
+    }
+
+    // 原生 SVG 繪圖邏輯 (代替 Chart.js)
+    function renderChart(data) {
+        const svg = document.getElementById('svg-chart');
+        svg.innerHTML = ''; // 清空
+        if (data.length < 2) return;
+
+        // 取最近 10 筆
+        const lastData = data.slice(-10);
+        const weights = lastData.map(d => d.weight);
+        const maxW = Math.max(...weights) + 5;
+        const minW = Math.min(...weights) - 5;
+        const range = maxW - minW;
+
+        let points = "";
+        const width = 500;
+        const height = 250;
+        const step = width / (lastData.length - 1);
+
+        lastData.forEach((d, i) => {
+            const x = i * step;
+            const y = height - ((d.weight - minW) / range * height);
+            points += `${x},${y} `;
+            
+            // 畫點
+            const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            circle.setAttribute("cx", x);
+            circle.setAttribute("cy", y);
+            circle.setAttribute("r", "5");
+            circle.setAttribute("class", "dot");
+            svg.appendChild(circle);
+        });
+
+        // 畫線
+        const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        polyline.setAttribute("points", points);
+        polyline.setAttribute("class", "line-path");
+        svg.appendChild(polyline);
+    }
+
+    function renderTable(data) {
+        const list = document.getElementById('history-list');
+        list.innerHTML = data.slice().reverse().map(d => `
+            <tr>
+                <td>${d.date}</td>
+                <td><strong>${d.bmi}</strong></td>
+                <td>${d.sys}/${d.dia}</td>
+                <td>${d.hr}</td>
+            </tr>
+        `).join('');
+    }
+
+    function exportData() {
+        const data = localStorage.getItem(STORAGE_KEY);
+        if(!data) return alert("尚無數據可匯出");
+        
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `health_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+    }
+</script>
+
+</body>
+</html>
